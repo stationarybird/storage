@@ -1,0 +1,16 @@
+# Go
+bin/
+coverage.out
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Local state and editor files
+data/
+.DS_Store
+.idea/
+.vscode/
