@@ -5,10 +5,36 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"distributedcache/internal/cache"
 )
+
+func TestDurableStoreHTTPErrors(t *testing.T) {
+	store, err := cache.OpenDurableStore(filepath.Join(t.TempDir(), "http.wal"), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	server := NewServer(store)
+	request := func(method, key string, want int) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		server.ServeHTTP(w, httptest.NewRequest(method, "/v1/kv/"+key, bytes.NewBufferString(`{"value":"x"}`)))
+		if w.Code != want {
+			t.Fatalf("%s %s: got %d, want %d", method, key, w.Code, want)
+		}
+	}
+	request(http.MethodPut, "a", http.StatusNoContent)
+	request(http.MethodPut, "b", http.StatusInsufficientStorage)
+	request(http.MethodPut, "a", http.StatusNoContent)
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request(http.MethodPut, "a", http.StatusServiceUnavailable)
+	request(http.MethodDelete, "a", http.StatusServiceUnavailable)
+}
 
 func TestHealthz(t *testing.T) {
 	server := NewServer(cache.NewMemoryStore(10))

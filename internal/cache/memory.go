@@ -45,7 +45,7 @@ func (s *MemoryStore) Get(key string) ([]byte, bool) {
 	return append([]byte(nil), item.value...), true
 }
 
-func (s *MemoryStore) Put(key string, value []byte, ttl time.Duration) {
+func (s *MemoryStore) Put(key string, value []byte, ttl time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -58,7 +58,7 @@ func (s *MemoryStore) Put(key string, value []byte, ttl time.Duration) {
 		item.value = append([]byte(nil), value...)
 		item.expiration = expiration
 		s.order.MoveToFront(item.node)
-		return
+		return nil
 	}
 
 	item := &entry{
@@ -73,15 +73,17 @@ func (s *MemoryStore) Put(key string, value []byte, ttl time.Duration) {
 		leastRecentKey := leastRecent.Value.(string)
 		s.remove(leastRecentKey, s.entries[leastRecentKey])
 	}
+	return nil
 }
 
-func (s *MemoryStore) Delete(key string) {
+func (s *MemoryStore) Delete(key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if item, exists := s.entries[key]; exists {
 		s.remove(key, item)
 	}
+	return nil
 }
 
 // remove deletes an entry and its LRU node. The caller must hold s.mu.

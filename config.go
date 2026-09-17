@@ -5,6 +5,7 @@ import "os"
 type config struct {
 	ListenAddress string
 	Capacity      int
+	WALPath       string
 }
 
 func loadConfig() config {
@@ -13,9 +14,13 @@ func loadConfig() config {
 		address = ":8080"
 	}
 
+	walPath := os.Getenv("CACHE_WAL_PATH")
+	if walPath == "" {
+		walPath = "cache.wal"
+	}
 	return config{
 		ListenAddress: address,
-		// You will make this capacity meaningful when implementing LRU eviction.
-		Capacity: 1_000,
+		Capacity:      1_000,
+		WALPath:       walPath,
 	}
 }

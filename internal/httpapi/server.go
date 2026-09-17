@@ -3,6 +3,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -34,7 +35,6 @@ func NewServer(store cache.Store) http.Handler {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// TODO: Register PUT, GET, and DELETE /v1/kv/{key} handlers here.
 	mux.HandleFunc("PUT /v1/kv/{key}", func(w http.ResponseWriter, r *http.Request) {
 		key := r.PathValue("key")
 		var request putRequest
@@ -57,7 +57,10 @@ func NewServer(store cache.Store) http.Handler {
 			return
 		}
 
-		store.Put(key, []byte(*request.Value), time.Duration(request.TTLMS)*time.Millisecond)
+		if err := store.Put(key, []byte(*request.Value), time.Duration(request.TTLMS)*time.Millisecond); err != nil {
+			writeStoreError(w, err)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /v1/kv/{key}", func(w http.ResponseWriter, r *http.Request) {
@@ -70,10 +73,21 @@ func NewServer(store cache.Store) http.Handler {
 		writeJSON(w, http.StatusOK, getResponse{Key: key, Value: string(value)})
 	})
 	mux.HandleFunc("DELETE /v1/kv/{key}", func(w http.ResponseWriter, r *http.Request) {
-		store.Delete(r.PathValue("key"))
+		if err := store.Delete(r.PathValue("key")); err != nil {
+			writeStoreError(w, err)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 	return mux
+}
+
+func writeStoreError(w http.ResponseWriter, err error) {
+	if errors.Is(err, cache.ErrCapacity) {
+		writeError(w, http.StatusInsufficientStorage, err.Error())
+		return
+	}
+	writeError(w, http.StatusServiceUnavailable, "storage write failed")
 }
 
 func ensureOnlyOneJSONValue(decoder *json.Decoder) error {
