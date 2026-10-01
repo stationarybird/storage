@@ -12,8 +12,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: make test
-      - run: go vet ./...
+          cache: false # Standard-library-only module; no go.sum to cache against.
+      - name: Test with race detector
+        run: go test -race ./...
+      - name: Vet
+        run: go vet ./...
