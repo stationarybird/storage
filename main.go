@@ -14,17 +14,27 @@ import (
 )
 
 func main() {
-	config := loadConfig()
+	config, err := loadConfig()
+	if err != nil {
+		slog.Error("configuration failed", "error", err)
+		os.Exit(1)
+	}
 	store, err := cache.OpenDurableStore(config.WALPath, config.Capacity)
 	if err != nil {
 		slog.Error("open durable store", "error", err)
 		os.Exit(1)
 	}
 	defer store.Close()
+	handler, err := httpapi.NewReplicatedServer(store, config.NodeID, config.Peers, 64, config.Replication)
+	if err != nil {
+		slog.Error("cluster configuration failed", "error", err)
+		_ = store.Close()
+		os.Exit(1)
+	}
 
 	server := &http.Server{
 		Addr:              config.ListenAddress,
-		Handler:           httpapi.NewServer(store),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -51,5 +61,8 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("graceful shutdown failed", "error", err)
 		_ = server.Close()
+	}
+	if err := store.Snapshot(); err != nil {
+		slog.Error("snapshot failed", "error", err)
 	}
 }

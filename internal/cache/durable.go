@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"distributedcache/internal/version"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -19,23 +20,27 @@ import (
 const maxRecordBytes = 16 << 20
 
 type walRecord struct {
-	Version int       `json:"version"`
-	Op      string    `json:"op"`
-	Key     string    `json:"key"`
-	Value   []byte    `json:"value,omitempty"`
-	Expires time.Time `json:"expires,omitempty"`
+	Siblings []version.Record `json:"siblings,omitempty"`
+	Sequence uint64           `json:"sequence,omitempty"`
+	Version  int              `json:"version"`
+	Op       string           `json:"op"`
+	Key      string           `json:"key"`
+	Value    []byte           `json:"value,omitempty"`
+	Expires  time.Time        `json:"expires,omitempty"`
 }
 
 // DurableStore keeps live values in RAM and synchronously persists mutations.
 // Capacity counts keys; <= 0 means unlimited. It never evicts live keys.
 // A WAL file has one owner. File locking currently supports Unix platforms.
 type DurableStore struct {
-	mu       sync.Mutex
-	file     *os.File
-	entries  map[string]walRecord
-	capacity int
-	failed   error
-	closed   bool
+	mu           sync.Mutex
+	file         *os.File
+	entries      map[string]walRecord
+	capacity     int
+	failed       error
+	closed       bool
+	sequence     uint64
+	snapshotPath string
 }
 
 func OpenDurableStore(path string, capacity int) (*DurableStore, error) {
@@ -49,7 +54,11 @@ func OpenDurableStore(path string, capacity int) (*DurableStore, error) {
 		f.Close()
 		return nil, fmt.Errorf("lock WAL: %w", err)
 	}
-	s := &DurableStore{file: f, capacity: capacity, entries: make(map[string]walRecord)}
+	s := &DurableStore{file: f, capacity: capacity, entries: make(map[string]walRecord), snapshotPath: path + ".snapshot"}
+	if err := s.loadSnapshot(); err != nil {
+		f.Close()
+		return nil, err
+	}
 	if err := s.replay(); err != nil {
 		f.Close()
 		return nil, err
@@ -75,6 +84,8 @@ func OpenDurableStore(path string, capacity int) (*DurableStore, error) {
 
 func (s *DurableStore) replay() error {
 	var offset int64
+	var previous uint64
+	boundary := s.sequence
 	for {
 		var header [8]byte
 		_, err := io.ReadFull(s.file, header[:])
@@ -102,12 +113,37 @@ func (s *DurableStore) replay() error {
 		if err := json.Unmarshal(payload, &record); err != nil {
 			return fmt.Errorf("decode WAL at %d: %w", offset, err)
 		}
-		if record.Version != 1 || (record.Op != "put" && record.Op != "delete") {
+		if !validRecord(record) {
 			return fmt.Errorf("unsupported WAL record at %d", offset)
 		}
-		s.apply(record)
+		// Old WALs had no sequences. Assign their original physical order.
+		if record.Sequence == 0 {
+			record.Sequence = previous + 1
+		}
+		if record.Sequence <= previous || (previous != 0 && record.Sequence != previous+1) {
+			return fmt.Errorf("invalid WAL sequence at %d", offset)
+		}
+		previous = record.Sequence
+		if record.Sequence > boundary {
+			if record.Sequence != s.sequence+1 {
+				return fmt.Errorf("missing WAL sequence at %d", offset)
+			}
+			s.apply(record)
+			s.sequence = record.Sequence
+		}
 		offset += 8 + int64(size)
 	}
+}
+
+func validRecord(r walRecord) bool {
+	if r.Version == 1 {
+		return len(r.Siblings) == 0 && (r.Op == "put" || r.Op == "delete")
+	}
+	if r.Version != 2 || r.Op != "put" || len(r.Siblings) == 0 || !r.Expires.IsZero() || len(r.Value) != 0 {
+		return false
+	}
+	_, err := version.Merge(r.Siblings)
+	return err == nil
 }
 
 func (s *DurableStore) trimTail(offset int64) error {
@@ -133,6 +169,10 @@ func (s *DurableStore) append(r walRecord) error {
 	if s.failed != nil {
 		return s.failed
 	}
+	if s.sequence == ^uint64(0) {
+		return errors.New("WAL sequence exhausted")
+	}
+	r.Sequence = s.sequence + 1
 	payload, err := json.Marshal(r)
 	if err != nil {
 		return err
@@ -158,6 +198,7 @@ func (s *DurableStore) append(r walRecord) error {
 		return s.failed
 	}
 	s.apply(r)
+	s.sequence = r.Sequence
 	return nil
 }
 

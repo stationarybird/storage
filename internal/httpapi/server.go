@@ -27,6 +27,7 @@ type errorResponse struct {
 
 func NewServer(store cache.Store) http.Handler {
 	mux := http.NewServeMux()
+	registerDashboard(mux)
 
 	// Keep this endpoint independent of storage so orchestration can distinguish
 	// a running process from later readiness/membership checks.

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KV · Workspace</title>
+<style>
+:root { color-scheme: dark; font: 16px/1.5 system-ui,sans-serif; background:#10151e; color:#edf1fa }
+* { box-sizing:border-box } body { max-width:1160px; margin:auto; padding:36px 22px } h1 {font-size:38px;margin:0} h2 {font-size:21px;margin:0 0 14px} p {color:#b9c5d8} header {margin-bottom:28px} .tag {color:#8be2c6;font-size:13px;text-transform:uppercase;letter-spacing:2px} .grid {display:grid;grid-template-columns:1fr 1fr;gap:22px} section {background:#192230;border:1px solid #314057;border-radius:16px;padding:24px} label {display:block;margin:14px 0 6px;color:#c9d5e7} input,textarea,button {font:inherit;border-radius:7px} input,textarea {width:100%;background:#0f1723;border:1px solid #465773;padding:10px;color:inherit} textarea {min-height:85px;resize:vertical} button {border:0;padding:10px 18px;background:#8be2c6;color:#10251f;cursor:pointer} button.secondary {background:#344760;color:#fff} button:disabled {opacity:.5;cursor:wait} .actions {display:flex;gap:8px;flex-wrap:wrap;margin-top:18px} .row {display:grid;grid-template-columns:1fr 1fr;gap:15px} pre {white-space:pre-wrap;overflow-wrap:anywhere;padding:14px;background:#0f1723;border-radius:8px;min-height:60px} svg {width:100%;max-height:320px} .note {font-size:14px} .error {color:#ffabb0} .flow {padding:14px;background:#101b29;border-radius:9px;color:#bcebdc} footer {margin-top:22px;color:#a4b4cb} :focus-visible {outline:2px solid #8be2c6;outline-offset:3px} @media(max-width:760px){.grid{grid-template-columns:1fr} body{padding:20px 12px}}
+</style>
+<style>
+:root{color-scheme:light;background:#e9ece4;color:#343e33;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+body{max-width:1160px;padding:48px 28px}header{padding:0 8px;margin-bottom:32px}h1{font-size:34px;font-weight:550;letter-spacing:-1.2px}h2{font-size:19px;font-weight:550}.tag{color:#6f8467;font-size:11px;letter-spacing:2px}p,.note{color:#727d6c}section{background:#fafbf7;border:1px solid #dfe5d8;border-radius:20px;padding:28px;box-shadow:0 8px 32px #27382004}.grid{gap:24px}label{color:#53604d;font-size:13px}input,textarea{background:#fff;border:1px solid #d6dfcf;color:#343e33;padding:12px;border-radius:9px}button{background:#536f48;color:white;border-radius:9px}button.secondary{background:#edf1e7;color:#53604d}pre{background:#f0f3ea;color:#343e33;font:13px/1.7 ui-monospace,monospace;padding:18px;border:1px solid #e3e8db;border-radius:12px}.error{color:#a24a3b}.flow{background:#eef3e7;color:#667d5a;font-size:13px}.note{font-size:12px}footer{color:#7f8879;font-size:12px;padding:0 8px}.tabs{display:flex;gap:4px;background:#edf1e7;padding:4px;border-radius:11px;margin:22px 0}.tabs button{flex:1;background:transparent;color:#78836e;border:0;padding:9px}.tabs button[aria-pressed=true]{background:white;color:#344c2b;box-shadow:0 1px 5px #00000008}.submit{width:100%;margin-top:22px}.submit.delete{background:#9b6254}[hidden]{display:none!important}.route{font-size:12px;color:#7a8570;overflow-wrap:anywhere}#health{font-size:12px;background:#f4f7ef;border:1px solid #d8e1ce;padding:6px 12px;border-radius:24px;display:inline-block}input[readonly]{background:#f1f4ec;border:0;color:#647456}:focus-visible{outline:2px solid #819973;outline-offset:3px}details{font-size:12px;color:#7f8879;margin-top:20px}summary{cursor:pointer}.result-label{margin-top:26px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#7f8879}@media(max-width:760px){body{padding:24px 12px}section{padding:22px}}
+</style>
+<header><div class="tag">Distributed cache · learning lab</div><h1>Where does a key go?</h1><p>Use your running store, then explore how a ring chooses owners.</p><span id="health" role="status">Checking local server…</span></header>
+<main class="grid">
+<section><h2>Key workspace</h2><div class="tabs" role="group" aria-label="Operation"><button type="button" data-method="GET" aria-pressed="true">Get</button><button type="button" data-method="PUT" aria-pressed="false">Put</button><button type="button" data-method="DELETE" aria-pressed="false">Delete</button></div>
+<p id="instruction" class="note">Find a value using its key.</p>
+<form id="kv-form"><label for="key">Key</label><input id="key" value="hello" placeholder="e.g. username:42" required autocomplete="off">
+<div id="put-fields" hidden><label for="value">Value</label><textarea id="value" placeholder="Enter a text value" disabled></textarea>
+<label for="ttl">Expires after (milliseconds)</label><input id="ttl" type="number" min="0" step="1" value="0" disabled><p class="note">0 keeps the value until you delete it.</p></div>
+<button id="submit" class="submit" type="submit">Get value →</button></form>
+<div class="result-label">Result</div><pre id="response" role="status" aria-live="polite">Your result will appear here.</pre><div id="route" class="route"></div>
+<details><summary>How storage works</summary>
+<p class="flow">Browser → coordinator → replica set<br>Write: replica WALs → disk sync → write quorum<br>Read: merge read quorum → repair stale replicas</p>
+<p class="note">Graceful shutdown saves a snapshot and compacts the WAL. Restart and Get the same key to check recovery.</p></details>
+</section>
+<section><h2>Where it lives</h2><p class="note">The ring selects replicas. Reads and writes need the configured quorum; placement is not a health check.</p>
+<label for="nodes">Configured node IDs</label><input id="nodes" readonly>
+<div class="row"><div><label for="vnodes">Positions per node</label><input id="vnodes" readonly></div><div><label for="replicas">Copies per key</label><input id="replicas" value="1" readonly></div></div>
+<div class="actions"><button id="preview" class="secondary">Refresh placement</button></div>
+<svg id="ring" viewBox="0 0 400 340" role="img" aria-label="Hash ring with clockwise positions and highlighted key"></svg>
+<pre id="placement" role="status" aria-live="polite">Choose a key on the left and calculate its owner.</pre>
+<p class="note">The diamond is your key. Walking clockwise selects distinct nodes for its replica set.</p>
+</section></main>
+<footer>Fixed-set replication · Causal siblings · Read repair · No hinted handoff yet. Keep membership fixed; automatic migration is not implemented.</footer>
+<script>
+const $ = id => document.getElementById(id);
+const palette = ['#75976a','#819bb6','#bd996e','#a18ab0','#b58087'];
+let method='GET',busy=false,placementVersion=0,placementTimer;
+const contexts=new Map();
+function selectMethod(next) {
+ method=next;
+ document.querySelectorAll('[data-method]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.method===method)));
+ $('put-fields').hidden=method!=='PUT';$('ttl').disabled=method!=='PUT';$('value').disabled=method!=='PUT';
+ $('submit').textContent={GET:'Get value →',PUT:'Save value →',DELETE:'Delete key →'}[method];
+ $('submit').classList.toggle('delete',method==='DELETE');
+ report('instruction',{GET:'Find a value using its key.',PUT:'Save a new value or replace the existing one.',DELETE:'Remove this key and its value from the owner.'}[method]);
+}
+function report(id, text, error=false) { $(id).textContent=text; $(id).classList.toggle('error',error); }
+async function kv(method) {
+ if(busy)return;
+ const key=$('key').value, ttl=Number($('ttl').value);
+ if(!key || key==='.' || key==='..') { report('response','Use a nonempty key other than . or ..',true); return; }
+ if(method==='PUT' && (!Number.isSafeInteger(ttl)||ttl<0)) { report('response','TTL must be a non-negative safe integer.',true); return; }
+ busy=true;$('submit').disabled=true;const buttons=document.querySelectorAll('[data-method]'); buttons.forEach(b=>b.disabled=true);
+ report('response','Contacting replicas…');report('route','');
+ try {
+  const mutation=method==='PUT'?{value:$('value').value,ttl_ms:ttl}:{};
+  if(contexts.has(key))mutation.context=contexts.get(key);
+  const response=await fetch('/v1/kv/'+encodeURIComponent(key), {method, headers:{'Content-Type':'application/json'}, ...(method!=='GET'?{body:JSON.stringify(mutation)}:{})});
+  const body=await response.text();
+  let data;try{data=body?JSON.parse(body):{};}catch{data={error:body};}
+  if(data.context)contexts.set(key,data.context);
+  if(response.ok&&method!=='GET')contexts.delete(key);
+  let result=response.ok?(method==='GET'?data.value:method==='PUT'?'Saved '+JSON.stringify(key)+' to a write quorum.':'Delete tombstone acknowledged by a write quorum.'):response.status===404?'No live value found for '+JSON.stringify(key)+'.':data.error||'Request failed.';
+  if(response.status===409&&data.siblings)result+='\n\n'+data.siblings.map((s,i)=>(i+1)+'. '+(s.deleted?'[deleted]':s.expires&&Date.parse(s.expires)<=Date.now()?'[expired]':JSON.stringify(s.value))).join('\n')+'\n\nChoose Put and enter the resolved value, or Delete. The next write uses the context of these siblings.';
+  report('response',result,!response.ok);
+  report('route',method+' '+JSON.stringify(key)+' · '+response.status+' · Coordinator '+(response.headers.get('X-Receiving-Node')||'local')+' → replicas '+(response.headers.get('X-Replica-Nodes')||'local'));
+ } catch(e) { report('response','Request failed: '+e.message,true); }
+ finally {busy=false;$('submit').disabled=false; buttons.forEach(b=>b.disabled=false); }
+}
+document.querySelectorAll('[data-method]').forEach(b=>b.addEventListener('click',()=>selectMethod(b.dataset.method)));
+$('kv-form').addEventListener('submit',event=>{event.preventDefault();kv(method);});
+function svgElement(name,attrs,text) { const e=document.createElementNS('http://www.w3.org/2000/svg',name); for(const [k,v] of Object.entries(attrs)) e.setAttribute(k,v); if(text!==undefined)e.textContent=text; $('ring').appendChild(e); return e; }
+function locationFor(position,radius) { const angle=Number(position)/2**64*2*Math.PI-Math.PI/2; return [200+radius*Math.cos(angle),165+radius*Math.sin(angle)]; }
+async function preview() {
+ const version=++placementVersion;
+ $('preview').disabled=true;
+ try {
+  const request={key:$('key').value,replicas:1};
+  const response=await fetch('/debug/cluster?key='+encodeURIComponent(request.key));
+  const data=await response.json(); if(!response.ok)throw Error(data.error);
+  if(version!==placementVersion)return;
+  const nodes=data.nodes.map(n=>n.id);
+  request.virtual_nodes=data.virtual_nodes;
+  $('nodes').value=nodes.join(', '); $('vnodes').value=data.virtual_nodes;$('replicas').value=data.replicas.length;
+  $('ring').replaceChildren();
+  svgElement('circle',{cx:200,cy:165,r:115,fill:'none',stroke:'#d9e1d2','stroke-width':2});
+  svgElement('text',{x:200,y:155,'text-anchor':'middle',fill:'#536f48','font-size':24},data.replicas.join(' · '));
+  svgElement('text',{x:200,y:178,'text-anchor':'middle',fill:'#7f8879','font-size':12},'R='+data.read_quorum+' · W='+data.write_quorum);
+  for(const p of data.positions) {
+   const [x,y]=locationFor(p.position,115), color=palette[nodes.indexOf(p.node_id)%palette.length];
+   const dot=svgElement('circle',{cx:x,cy:y,r:request.virtual_nodes>16?2.5:5,fill:color});
+   const title=document.createElementNS('http://www.w3.org/2000/svg','title'); title.textContent=p.node_id+' · '+p.position; dot.appendChild(title);
+   if(data.positions.length<=12) { const [lx,ly]=locationFor(p.position,139);svgElement('text',{x:lx,y:ly,'text-anchor':'middle',fill:color,'font-size':11},p.node_id); }
+  }
+  const [kx,ky]=locationFor(data.key_position,115);
+  svgElement('path',{d:`M ${kx} ${ky-9} l 9 9 l -9 9 l -9 -9 Z`,fill:'#343e33',stroke:'#fff','stroke-width':2});
+  report('placement','Key: '+JSON.stringify(request.key)+'\nCoordinator: '+data.receiving_node+'\nReplicas: '+data.replicas.join(', ')+'\nRead quorum: '+data.read_quorum+' · Write quorum: '+data.write_quorum+'\n\n'+data.nodes.map(n=>n.id+' → '+n.address).join('\n'));
+ } catch(e) { if(version===placementVersion){$('ring').replaceChildren();report('placement',e.message,true);} }
+ finally { $('preview').disabled=false; }
+}
+$('preview').addEventListener('click',preview);
+$('key').addEventListener('input',()=>{clearTimeout(placementTimer);placementVersion++;report('placement','Updating ownership…');placementTimer=setTimeout(preview,200);});
+fetch('/healthz').then(r=>{if(!r.ok)throw Error();report('health','● Local server reachable');}).catch(()=>report('health','Local server unavailable',true));
+preview();
+</script>
+</html>
